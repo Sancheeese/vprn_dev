@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vprn"
+version = "0.1.0"
+description = "Configuration-driven clinical CT-X-ray registration pipeline"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "nibabel",
+  "pydicom",
+  "SimpleITK",
+  "scipy",
+  "torch",
+  "torchvision",
+  "timm",
+  "diffdrr",
+  "cma",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

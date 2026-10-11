@@ -1,0 +1,21 @@
+{
+  "case": "zyl",
+  "mode": "fft",
+  "device": "cuda:0",
+  "batch_size": 8,
+  "height": 256,
+  "bone_threshold": 350.0,
+  "seed": 7,
+  "contrast": 4.79563570022583,
+  "cutoff_ratio": 0.1915811151266098,
+  "tube_applied": true,
+  "checkpoint": null,
+  "loss_before_training": 6.281927108764648,
+  "panels": [
+    "target DRR",
+    "FFT input",
+    "bone/tube target",
+    "predicted DRR",
+    "predicted mask"
+  ]
+}

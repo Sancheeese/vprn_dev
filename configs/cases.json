@@ -1,0 +1,140 @@
+{
+  "cases": {
+    "ysy": {
+      "patient_name": "杨式瑜",
+      "ct_series": "7",
+      "ct_path": "data/ysy/ct/ct.nii",
+      "xray_path": "data/ysy/xray",
+      "seg_path": "data/ysy/seg",
+      "gt_pose_path": "data/ysy/gt_pose",
+      "fiducial_path": "data/ysy/fid_ysy.json",
+      "model": "PoseRegressorAddSpDeco",
+      "checkpoint": "checkpoints/ysy/train/best.ckpt",
+      "fiducial_projection": "negate_x",
+      "train_model": "PoseRegressorAddSpDeco",
+      "train_checkpoint": "checkpoints/ysy/train/best.ckpt",
+      "register_model": "PoseRegressorAddSpDeco",
+      "register_checkpoint": "checkpoints/ysy/train/best.ckpt",
+      "registration_params": {"rotation_lr": 0.015, "translation_lr": 7.5, "sigma0": 1.0},
+      "training_params": {"mask_weight": 10.0, "bone_threshold": 250},
+      "model_params": {"model_name": "resnet18", "parameterization": "se3_log_map", "convention": null, "pretrained": false, "norm_layer": "groupnorm"},
+      "geometry": {
+        "y_offset": 50,
+        "z_offset": -50,
+        "z_cut": 400,
+        "factors": [0.8, 1.5, 0.8],
+        "axis_transform": "ysy_legacy",
+        "spacing_permutation": [1, 2, 0]
+      }
+    },
+    "sxh": {
+      "patient_name": "孙新华",
+      "ct_series": "3",
+      "ct_path": "data/sxh/ct/ct.nii",
+      "xray_path": "data/sxh/xray",
+      "seg_path": "data/sxh/seg",
+      "gt_pose_path": "data/sxh/gt_pose",
+      "fiducial_path": "data/sxh/fid_sxh.json",
+      "model": "PoseRegressorAddSpDeco",
+      "checkpoint": "checkpoints/sxh/train/best.ckpt",
+      "fiducial_projection": "negate_x",
+      "train_model": "PoseRegressorAddSpDeco",
+      "train_checkpoint": "checkpoints/sxh/train/best.ckpt",
+      "register_model": "PoseRegressorAddSpDeco",
+      "register_checkpoint": "checkpoints/sxh/train/best.ckpt",
+      "registration_params": {"rotation_lr": 0.015, "translation_lr": 7.5, "sigma0": 1.0},
+      "training_params": {"mask_weight": 10.0, "bone_threshold": 300},
+      "model_params": {"model_name": "resnet18", "parameterization": "se3_log_map", "convention": null, "pretrained": false, "norm_layer": "groupnorm"},
+      "geometry": {
+        "x_offset": 20,
+        "y_offset": 200,
+        "z_offset": 100,
+        "z_cut": 250,
+        "factors": [0.6, 0.6, 1.5],
+        "axis_transform": "sxh_legacy"
+      }
+    },
+    "wfl": {
+      "patient_name": "王凤兰",
+      "ct_series": "306",
+      "ct_path": "data/wfl/ct/ct.nii",
+      "xray_path": "data/wfl/xray",
+      "seg_path": "data/wfl/seg",
+      "gt_pose_path": "data/wfl/gt_pose",
+      "fiducial_path": "data/wfl/fid_wfl.json",
+      "model": "PoseRegressorCoeSpDeco",
+      "checkpoint": "checkpoints/wfl/train/best.ckpt",
+      "fiducial_projection": "negate_x",
+      "registration_params": {"rotation_lr": 0.015, "translation_lr": 7.5, "sigma0": 1.0},
+      "training_params": {"mask_weight": 10.0, "bone_threshold": 350},
+      "train_model": "PoseRegressorGSpDeco",
+      "train_checkpoint": "checkpoints/wfl/train/best.ckpt",
+      "register_model": "PoseRegressorCoeSpDeco",
+      "register_checkpoint": "checkpoints/wfl/train/best.ckpt",
+      "model_params": {"model_name": "resnet18", "parameterization": "se3_log_map", "convention": null, "pretrained": false, "norm_layer": "groupnorm"},
+      "geometry": {
+        "x_offset": 20,
+        "z_offset": 50,
+        "z_cut": 30,
+        "z_cut_end": 250,
+        "factors": [0.5, 0.5, 1.0],
+        "axis_transform": "wfl_legacy"
+      }
+    },
+    "xyl": {
+      "patient_name": "许玉露",
+      "ct_series": "3",
+      "ct_path": "data/xyl/ct/ct.nii",
+      "xray_path": "data/xyl/xray",
+      "seg_path": "data/xyl/seg",
+      "gt_pose_path": "data/xyl/gt_pose",
+      "fiducial_path": "data/xyl/fid_xyl.json",
+      "model": "PoseRegressorGSpDeco",
+      "checkpoint": "checkpoints/xyl/train/best.ckpt",
+      "fiducial_projection": "swap_xy",
+      "train_model": "PoseRegressorGSpDeco",
+      "train_checkpoint": "checkpoints/xyl/train/best.ckpt",
+      "register_model": "PoseRegressorGSpDeco",
+      "register_checkpoint": "checkpoints/xyl/train/best.ckpt",
+      "registration_params": {"rotation_lr": 0.015, "translation_lr": 7.5, "sigma0": 1.0},
+      "training_params": {"mask_weight": 10.0, "bone_threshold": 350},
+      "model_params": {"model_name": "resnet18", "parameterization": "se3_log_map", "convention": null, "pretrained": false, "norm_layer": "groupnorm"},
+      "geometry": {
+        "z_offset": 100,
+        "factors": [0.5, 4.0, 0.5],
+        "axis_transform": "xyl_legacy",
+        "spacing_permutation": [1, 2, 0]
+      }
+    },
+    "zyl": {
+      "patient_name": "张燕玲",
+      "ct_series": "203",
+      "ct_path": "data/zyl/ct/ct.nii",
+      "xray_path": "data/zyl/xray",
+      "seg_path": "data/zyl/seg",
+      "gt_pose_path": "data/zyl/gt_pose",
+      "model": "PoseRegressorCoeSpDeco",
+      "checkpoint": "checkpoints/zyl/train/best.ckpt",
+      "fiducial_projection": "negate_x",
+      "registration_params": {"rotation_lr": 0.015, "translation_lr": 7.5, "sigma0": 1.0},
+      "training_params": {"mask_weight": 10.0, "bone_threshold": 350},
+      "train_model": "PoseRegressorCoeSpDeco",
+      "train_checkpoint": "checkpoints/zyl/train/best.ckpt",
+      "register_model": "PoseRegressorCoeSpDeco",
+      "register_checkpoint": "checkpoints/zyl/train/best.ckpt",
+      "model_params": {"model_name": "resnet18", "parameterization": "se3_log_map", "convention": null, "pretrained": false, "norm_layer": "groupnorm"},
+      "pose_mode": "legacy_zyl",
+      "pose_params": {
+        "early": [1.8217, -0.6765, -0.6885, 247.93832397460938, 23.56032943725586, 96.44742584228516],
+        "late": [1.8634, -0.6013, -0.6287, 257.1594, 28.075, 113.1432],
+        "default": [1.796, -0.6849, -0.6802, 247.5287, 19.4671, 117.9272]
+      },
+      "geometry": {
+        "y_offset": 300,
+        "z_cut": 650,
+        "factors": [2.0, 0.4, 0.4],
+        "axis_transform": "zyl_legacy"
+      }
+    }
+  }
+}
