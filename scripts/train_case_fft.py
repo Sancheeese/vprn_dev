@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import sys
 from pathlib import Path
 
@@ -22,17 +21,17 @@ for legacy_path in (DIFFPOSE_ROOT, DIFFPOSE_ROOT / "ours"):
     if str(legacy_path) not in sys.path:
         sys.path.insert(0, str(legacy_path))
 
-from ours.fft import high_pass_gaussian  # noqa: E402
 from ours.utils.mask_data import MaskDataAugmentation  # noqa: E402
-from vprn.cli.common import build_dataset, build_model, case_snapshot, checkpoint_run_dir  # noqa: E402
-from vprn.cli.legacy import random_offset  # noqa: E402
+from vprn.cli.common import build_model, case_snapshot, checkpoint_run_dir  # noqa: E402
 from vprn.config import load_case  # noqa: E402
 from vprn.evaluation.artifacts import _json_safe  # noqa: E402
-from vprn.models.registry import load_checkpoint  # noqa: E402
 from vprn.registration.initialization import forward_model  # noqa: E402
 from vprn.registration.optimizers import create_scheduler  # noqa: E402
 from vprn.rendering.drr import create_drr  # noqa: E402
-from vprn.rendering.transforms import ImageTransforms  # noqa: E402
+from vprn.training.fft_recipe import (  # noqa: E402
+    build_fft_dataset, fft_case, fft_scheduler, fft_transforms,
+    prepare_fft_batch, random_fft_offset,
+)
 from vprn.training.checkpoint import save_checkpoint  # noqa: E402
 from vprn.training.losses import registration_loss  # noqa: E402
 from vprn.training.trainer import Trainer  # noqa: E402
@@ -46,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "configs" / "cases.json")
     parser.add_argument("--run-id", default="train-fft")
     parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--epochs", type=int, default=1000)
+    parser.add_argument("--epochs", type=int, default=1000, help="Final epoch label; fresh runs execute epochs 0 through this value.")
     parser.add_argument("--batches-per-epoch", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--height", type=int, default=256)
@@ -59,11 +58,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--save-every-epochs",
         type=int,
-        default=100,
-        help="Save last.ckpt and an epoch checkpoint every N epochs (default: 100).",
+        default=50,
+        help="Save an epoch checkpoint every N epochs; last.ckpt is saved every epoch.",
     )
     parser.add_argument("--accumulate-step", type=int, default=1)
     parser.add_argument("--gradient-clip-norm", type=float)
+    parser.add_argument("--disable-agc", action="store_true", help="Disable the original adaptive gradient clipping.")
     parser.add_argument(
         "--scheduler", choices=["none", "step", "cosine", "warmup_cosine"], default="warmup_cosine"
     )
@@ -97,6 +97,8 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("contrast bounds must satisfy 0 < contrast-min <= contrast-max")
     if args.save_every_epochs <= 0:
         raise ValueError("save-every-epochs must be positive")
+    if args.accumulate_step <= 0 or args.batches_per_epoch % args.accumulate_step:
+        raise ValueError("batches-per-epoch must be divisible by accumulate-step")
 
 
 def main() -> int:
@@ -105,8 +107,8 @@ def main() -> int:
     drr_patch_size = args.drr_patch_size or args.height // 2
     if drr_patch_size <= 0 or args.height % drr_patch_size != 0:
         raise ValueError("drr-patch-size must be a positive divisor of height")
-    case = load_case(args.case, args.config)
-    dataset = build_dataset(case)
+    case = fft_case(load_case(args.case, args.config))
+    dataset = build_fft_dataset(case)
     checkpoint_dir = checkpoint_run_dir(PROJECT_ROOT / "checkpoints", case.case_id, args.run_id)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     train_model = case.train_model or case.model
@@ -122,6 +124,11 @@ def main() -> int:
         batch_size=args.batch_size,
         scheduler=args.scheduler,
         warmup_steps=warmup_steps,
+        learning_rate=args.learning_rate,
+        accumulate_step=args.accumulate_step,
+        adaptive_gradient_clipping=not args.disable_agc,
+        gradient_clip_norm=args.gradient_clip_norm,
+        epoch_numbering="zero_based_inclusive",
         drr_patch_size=drr_patch_size,
         fft={
             "cutoff_min": args.cutoff_min,
@@ -156,6 +163,7 @@ def main() -> int:
         device=args.device,
         bone_threshold=bone_threshold,
         patch_size=drr_patch_size,
+        delx=dataset.delx * 512 / args.height,
     )
     drr_bone = create_drr(
         dataset,
@@ -164,16 +172,20 @@ def main() -> int:
         bone=True,
         bone_threshold=bone_threshold,
         patch_size=drr_patch_size,
+        delx=dataset.delx * 512 / args.height,
     )
-    transforms = ImageTransforms(args.height)
+    transforms = fft_transforms(args.height)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     resume_payload = None
     if args.resume is not None:
         resume_payload = torch.load(args.resume, map_location=args.device, weights_only=False)
-        load_checkpoint(model, args.resume, device=args.device)
+        # Resuming another architecture must fail before any training update.
+        model.load_state_dict(resume_payload["model_state_dict"], strict=True)
         if isinstance(resume_payload, dict) and "optimizer_state_dict" in resume_payload:
             optimizer.load_state_dict(resume_payload["optimizer_state_dict"])
-    resume_epoch = int((resume_payload or {}).get("epoch", 0))
+    start_epoch = int(resume_payload["epoch"]) + 1 if resume_payload is not None else 0
+    if start_epoch > args.epochs:
+        raise ValueError("resume checkpoint already reached --epochs; choose a higher final epoch")
 
     from diffdrr.metrics import MultiscaleNormalizedCrossCorrelation2d
     from diffpose.metrics import DoubleGeodesic, GeodesicSE3
@@ -187,7 +199,7 @@ def main() -> int:
     def step_fn(current_model, _batch):
         contrast = contrast_distribution.sample().item()
         cutoff_ratio = cutoff_distribution.sample().item()
-        offset = random_offset(args.batch_size, args.device)
+        offset = random_fft_offset(args.batch_size, args.device)
         isocenter = dataset.isocenter_pose.to(args.device)
         pose = (
             isocenter.compose(dataset.back_pose.to(args.device))
@@ -197,23 +209,13 @@ def main() -> int:
 
         image = drr(None, None, None, pose=pose, bone_attenuation_multiplier=contrast)
         bone = drr_bone(None, None, None, pose=pose)
-        bone = transforms(bone, reverse=False)
-        bone = (bone - bone.amin()) / (bone.amax() - bone.amin() + 1e-6)
-        bone = torch.tanh(50.0 * bone)
-
-        # Match the original ysy/sxh FFT recipe: high-pass the raw DRR, then normalize it.
-        image = transforms(image, reverse=False).to(torch.float32)
-        image_input = high_pass_gaussian(image, cutoff_ratio)
-        image_input = transforms(image_input, reverse=False).to(torch.float32)
-        target_mask = bone
-        if augmenter is not None and random.random() < args.tube_augmentation_prob:
-            image_input, tube = augmenter.augment(image_input)
-            target_mask = target_mask * tube
-        image_input = transforms(image_input, reverse=False).to(torch.float32)
+        image, image_input, target_mask, _tube_applied = prepare_fft_batch(
+            image, bone, transforms, cutoff_ratio, augmenter, args.tube_augmentation_prob,
+        )
 
         predicted_offset, predicted_mask = forward_model(current_model, image_input, target_mask)
         predicted_pose = isocenter.compose(predicted_offset)
-        predicted_image = transforms(drr(None, None, None, pose=predicted_pose), reverse=False)
+        predicted_image = transforms(drr(None, None, None, pose=predicted_pose).float())
         return registration_loss(
             predicted_pose,
             pose,
@@ -227,21 +229,25 @@ def main() -> int:
             mask_weight=float(case.training_params.get("mask_weight", 10.0)),
         )
 
-    total_steps = (resume_epoch + args.epochs) * args.batches_per_epoch
-    scheduler = create_scheduler(
-        optimizer,
-        kind=args.scheduler,
-        step_size=args.scheduler_step_size,
-        gamma=args.scheduler_gamma,
-        total_steps=total_steps if args.scheduler != "none" else None,
-        warmup_steps=warmup_steps,
-    )
+    if args.scheduler == "warmup_cosine":
+        scheduler = fft_scheduler(optimizer, args.epochs, args.batches_per_epoch, warmup_steps)
+    else:
+        scheduler = create_scheduler(
+            optimizer, kind=args.scheduler, step_size=args.scheduler_step_size,
+            gamma=args.scheduler_gamma, total_steps=args.epochs * args.batches_per_epoch,
+        )
     if (
         scheduler is not None
         and isinstance(resume_payload, dict)
         and "scheduler_state_dict" in resume_payload
     ):
         scheduler.load_state_dict(resume_payload["scheduler_state_dict"])
+        # Scheduler construction resets lr to step zero. Restore the saved
+        # optimizer rates so the first resumed update uses the correct rate.
+        for group, saved in zip(optimizer.param_groups, resume_payload["optimizer_state_dict"]["param_groups"]):
+            group["lr"] = saved["lr"]
+    from timm.utils.agc import adaptive_clip_grad
+
     trainer = Trainer(
         model,
         optimizer,
@@ -250,6 +256,9 @@ def main() -> int:
         device=args.device,
         accumulate_steps=args.accumulate_step,
         gradient_clip_norm=args.gradient_clip_norm,
+        gradient_clip_fn=None if args.disable_agc else adaptive_clip_grad,
+        skip_nan_loss=True,
+        flush_accumulation=False,
     )
     best_loss = float("inf")
     best_checkpoint = checkpoint_dir / "best.ckpt"
@@ -257,19 +266,28 @@ def main() -> int:
         best_payload = torch.load(best_checkpoint, map_location="cpu", weights_only=False)
         if isinstance(best_payload, dict) and "loss" in best_payload:
             best_loss = float(best_payload["loss"])
+    elif resume_payload is not None:
+        best_loss = float(resume_payload.get("loss", float("inf")))
+
+    history_path = checkpoint_dir / "train_history.json"
+    previous_history = json.loads(history_path.read_text()) if args.resume and history_path.is_file() else []
 
     checkpoint_metadata = {
         "case": case.case_id,
-        "model_name": train_model,
+        "model_class": train_model,
+        **case.model_params,
+        "epoch_numbering": "zero_based_inclusive",
         "height": args.height,
         "batch_size": args.batch_size,
         "batches_per_epoch": args.batches_per_epoch,
+        "n_batches_per_epoch": args.batches_per_epoch,
+        "n_epochs": args.epochs,
         "drr_patch_size": drr_patch_size,
     }
 
     def write_history(history: list[dict[str, float | int]]) -> None:
         (checkpoint_dir / "train_history.json").write_text(
-            json.dumps(_json_safe(history), ensure_ascii=False, indent=2), encoding="utf-8"
+            json.dumps(_json_safe(previous_history + history), ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
     def save_state(path: Path, completed_epoch: int, loss: float) -> None:
@@ -289,26 +307,27 @@ def main() -> int:
         partial_history: list[dict[str, float | int]],
     ) -> None:
         nonlocal best_loss
-        completed_epoch = resume_epoch + relative_epoch + 1
+        completed_epoch = start_epoch + relative_epoch
+        record["epoch"] = completed_epoch
         loss = float(record["loss"])
         if loss < best_loss:
             best_loss = loss
             save_state(best_checkpoint, completed_epoch, loss)
+        save_state(checkpoint_dir / "last.ckpt", completed_epoch, loss)
+        write_history(partial_history)
         if completed_epoch % args.save_every_epochs == 0:
-            save_state(checkpoint_dir / "last.ckpt", completed_epoch, loss)
             save_state(checkpoint_dir / f"epoch{completed_epoch:04d}.ckpt", completed_epoch, loss)
-            write_history(partial_history)
             print(f"Saved checkpoint at epoch {completed_epoch}: loss={loss:.6f}")
 
     history = trainer.fit(
         [None] * args.batches_per_epoch,
-        epochs=args.epochs,
+        epochs=args.epochs - start_epoch + 1,
         progress=True,
         on_epoch_end=on_epoch_end,
     )
     write_history(history)
     final_loss = float(history[-1]["loss"]) if history else float("nan")
-    final_epoch = resume_epoch + args.epochs
+    final_epoch = args.epochs
     save_state(checkpoint_dir / "last.ckpt", final_epoch, final_loss)
     if not best_checkpoint.is_file():
         save_state(best_checkpoint, final_epoch, final_loss)

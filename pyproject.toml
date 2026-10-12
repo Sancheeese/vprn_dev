@@ -16,6 +16,7 @@ dependencies = [
   "torch",
   "torchvision",
   "timm",
+  "pytorch-transformers",
   "diffdrr",
   "cma",
 ]

@@ -19,7 +19,6 @@ for legacy_path in (DIFFPOSE_ROOT, DIFFPOSE_ROOT / "ours"):
     if str(legacy_path) not in sys.path:
         sys.path.insert(0, str(legacy_path))
 
-from ours.fft import high_pass_gaussian  # noqa: E402
 from ours.utils.mask_data import MaskDataAugmentation  # noqa: E402
 from vprn.cli.common import build_dataset, build_model  # noqa: E402
 from vprn.cli.legacy import random_offset  # noqa: E402
@@ -29,6 +28,9 @@ from vprn.registration.initialization import forward_model  # noqa: E402
 from vprn.rendering.drr import create_drr  # noqa: E402
 from vprn.rendering.transforms import ImageTransforms  # noqa: E402
 from vprn.training.losses import registration_loss  # noqa: E402
+from vprn.training.fft_recipe import (  # noqa: E402
+    build_fft_dataset, fft_case, fft_transforms, prepare_fft_batch, random_fft_offset,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -107,11 +109,13 @@ def main() -> int:
         random.seed(args.seed)
 
     case = load_case(args.case, args.config)
+    if args.mode == "fft":
+        case = fft_case(case)
     output_dir = args.output_dir or PROJECT_ROOT / "previews" / case.case_id / args.mode
     output_dir.mkdir(parents=True, exist_ok=True)
     for stale_preview in output_dir.glob("sample_*.png"):
         stale_preview.unlink()
-    dataset = build_dataset(case)
+    dataset = build_fft_dataset(case) if args.mode == "fft" else build_dataset(case)
     model = build_model(case, args.device, role="train")
     if args.checkpoint is not None:
         load_checkpoint(model, args.checkpoint, device=args.device)
@@ -126,6 +130,7 @@ def main() -> int:
         device=args.device,
         bone_threshold=bone_threshold,
         patch_size=drr_patch_size,
+        delx=dataset.delx * 512 / args.height,
     )
     drr_bone = create_drr(
         dataset,
@@ -134,8 +139,9 @@ def main() -> int:
         bone=True,
         bone_threshold=bone_threshold,
         patch_size=drr_patch_size,
+        delx=dataset.delx * 512 / args.height,
     )
-    transforms = ImageTransforms(args.height)
+    transforms = fft_transforms(args.height) if args.mode == "fft" else ImageTransforms(args.height)
     augmenter = (
         MaskDataAugmentation(args.tube_dir, resize_to=(args.height, args.height))
         if args.mode == "fft" and args.tube_augmentation_prob > 0.0
@@ -150,33 +156,28 @@ def main() -> int:
     isocenter = dataset.isocenter_pose.to(args.device)
     pose = (
         isocenter.compose(dataset.back_pose.to(args.device))
-        .compose(random_offset(args.batch_size, args.device))
+        .compose((random_fft_offset if args.mode == "fft" else random_offset)(args.batch_size, args.device))
         .compose(dataset.center_pose.to(args.device))
     )
     with torch.no_grad():
         if args.mode == "fft":
             contrast = torch.distributions.Uniform(args.contrast_min, args.contrast_max).sample().item()
             cutoff_ratio = torch.distributions.Uniform(args.cutoff_min, args.cutoff_max).sample().item()
-            target_image = transforms(
-                drr(None, None, None, pose=pose, bone_attenuation_multiplier=contrast), reverse=False
-            ).to(torch.float32)
+            image = drr(None, None, None, pose=pose, bone_attenuation_multiplier=contrast)
         else:
             target_image = transforms(drr(None, None, None, pose=pose), reverse=True).to(torch.float32)
-        bone = transforms(drr_bone(None, None, None, pose=pose), reverse=False)
-        bone = (bone - bone.amin()) / (bone.amax() - bone.amin() + 1e-6)
-        bone = torch.tanh(50.0 * bone)
+        bone = drr_bone(None, None, None, pose=pose)
         tube_applied = False
         if args.mode == "fft":
-            model_input = transforms(high_pass_gaussian(target_image, cutoff_ratio), reverse=False).to(torch.float32)
-            target_mask = bone
-            tube_applied = augmenter is not None and random.random() < args.tube_augmentation_prob
-            if tube_applied:
-                model_input, tube = augmenter.augment(model_input)
-                target_mask = target_mask * tube
-            model_input = transforms(model_input, reverse=False).to(torch.float32)
-            predicted_image_reverse = False
+            target_image, model_input, target_mask, tube_applied = prepare_fft_batch(
+                image, bone, transforms, cutoff_ratio, augmenter, args.tube_augmentation_prob,
+            )
+            predicted_image_reverse = True
         else:
             model_input = target_image
+            bone = transforms(bone, reverse=False)
+            bone = (bone - bone.amin()) / (bone.amax() - bone.amin() + 1e-6)
+            bone = torch.tanh(50.0 * bone)
             target_mask = bone
             predicted_image_reverse = True
         predicted_offset, predicted_mask = forward_model(model, model_input, target_mask)
@@ -184,7 +185,7 @@ def main() -> int:
             raise RuntimeError("configured model did not return a mask prediction")
         predicted_pose = isocenter.compose(predicted_offset)
         predicted_image = transforms(
-            drr(None, None, None, pose=predicted_pose), reverse=predicted_image_reverse
+            drr(None, None, None, pose=predicted_pose).float(), reverse=predicted_image_reverse
         )
         loss = registration_loss(
             predicted_pose,

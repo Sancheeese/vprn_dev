@@ -18,6 +18,9 @@ class Trainer:
         device: str | torch.device = "cpu",
         accumulate_steps: int = 1,
         gradient_clip_norm: float | None = None,
+        gradient_clip_fn: Callable | None = None,
+        skip_nan_loss: bool = False,
+        flush_accumulation: bool = True,
     ):
         self.model = model.to(device)
         self.optimizer = optimizer
@@ -30,6 +33,9 @@ class Trainer:
             raise ValueError("gradient_clip_norm must be positive")
         self.accumulate_steps = int(accumulate_steps)
         self.gradient_clip_norm = gradient_clip_norm
+        self.gradient_clip_fn = gradient_clip_fn
+        self.skip_nan_loss = skip_nan_loss
+        self.flush_accumulation = flush_accumulation
 
     def fit(
         self,
@@ -66,11 +72,17 @@ class Trainer:
                 loss = self.step_fn(self.model, batch)
                 if loss.ndim != 0:
                     loss = loss.mean()
+                if self.skip_nan_loss and torch.isnan(loss):
+                    continue
                 if not torch.isfinite(loss):
                     raise FloatingPointError(f"non-finite loss at epoch {epoch}: {loss.item()}")
                 loss.backward()
-                should_step = (batch_index + 1) % self.accumulate_steps == 0 or batch_index == len(materialized) - 1
+                should_step = (batch_index + 1) % self.accumulate_steps == 0 or (
+                    self.flush_accumulation and batch_index == len(materialized) - 1
+                )
                 if should_step:
+                    if self.gradient_clip_fn is not None:
+                        self.gradient_clip_fn(self.model.parameters())
                     if self.gradient_clip_norm is not None:
                         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip_norm)
                     self.optimizer.step()
@@ -86,6 +98,8 @@ class Trainer:
                     )
             if progress_bar is not None:
                 progress_bar.close()
+            if self.skip_nan_loss and not losses:
+                raise FloatingPointError(f"no valid losses at epoch {epoch}")
             record = {"epoch": epoch, "loss": sum(losses) / len(losses) if losses else float("nan")}
             history.append(record)
             if on_epoch_end is not None:
