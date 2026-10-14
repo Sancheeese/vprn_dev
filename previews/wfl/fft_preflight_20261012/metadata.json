@@ -1,0 +1,22 @@
+{
+  "case": "wfl",
+  "mode": "fft",
+  "device": "cpu",
+  "batch_size": 1,
+  "height": 256,
+  "drr_patch_size": 128,
+  "bone_threshold": 350.0,
+  "seed": 20261012,
+  "contrast": 6.58380651473999,
+  "cutoff_ratio": 0.18315057456493378,
+  "tube_applied": true,
+  "checkpoint": null,
+  "loss_before_training": 5.453704833984375,
+  "panels": [
+    "target DRR",
+    "FFT input",
+    "bone/tube target",
+    "predicted DRR",
+    "predicted mask"
+  ]
+}

@@ -68,6 +68,10 @@ high-pass cutoff 0.01-0.33, contrast 0.5-8.0, tube augmentation probability 0.7,
 NCC/pose/mask loss, adaptive gradient clipping, and the original
 `pytorch_transformers` warmup/cosine scheduler.
 
+All five cases select `PoseRegressorAddSpDeco` for FFT training. WFL and XYL
+retain their own CT geometry and 350 HU bone threshold. Their ordinary
+training and registration model selections remain case-specific.
+
 Case-specific FFT overrides live in `training_params.fft` in `configs/cases.json`.
 YSY uses CT factors `[0.7, 1.25, 0.7]`; SXH uses `[0.6, 0.6, 1.0]` and its
 `gt_pose/sxh.json` isocentre. Centre/back poses are computed before resampling.
@@ -83,6 +87,33 @@ PYTHONPATH=src conda run --no-capture-output -n mr2ct python scripts/train_case_
 PYTHONPATH=src conda run --no-capture-output -n mr2ct python scripts/preview_fft_training.py \
   --case zyl --mode fft --device cuda:0
 ```
+
+For WFL and XYL, first install the scheduler dependency if it is missing:
+
+```bash
+conda run -n mr2ct python -m pip install pytorch-transformers
+```
+
+The local `data/` directory can link to `../vprn/data` to reuse the existing
+clinical inputs. Checkpoints are written to this project's own `checkpoints/`
+directory. Preview each case, then start an independent training run:
+
+```bash
+PYTHONPATH=src conda run --no-capture-output -n mr2ct python scripts/preview_fft_training.py \
+  --case wfl --mode fft --device cuda:0 --batch-size 1 --num-previews 1
+PYTHONPATH=src conda run --no-capture-output -n mr2ct python scripts/preview_fft_training.py \
+  --case xyl --mode fft --device cuda:0 --batch-size 1 --num-previews 1
+
+PYTHONPATH=src conda run --no-capture-output -n mr2ct python scripts/train_case_fft.py \
+  --case wfl --run-id train-addspdeco-fft --device cuda:0
+PYTHONPATH=src conda run --no-capture-output -n mr2ct python scripts/train_case_fft.py \
+  --case xyl --run-id train-addspdeco-fft --device cuda:0
+```
+
+These runs initialize AddSpDeco from scratch. Only use `--resume` with a
+matching FFT AddSpDeco training checkpoint, rather than an existing GSpDeco
+or CoeSpDeco checkpoint. To run both cases concurrently, use separate
+terminals and GPUs after checking available device memory.
 
 Defaults match the original entrypoints: batch size 8, 100 batches per epoch,
 Adam learning rate 0.001, and accumulation 1. `--epochs 1000` denotes the final

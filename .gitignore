@@ -4,5 +4,5 @@ __pycache__/
 *.egg-info/
 
 # Local clinical data and experiment artifacts
-/data/
+/data
 /checkpoints/

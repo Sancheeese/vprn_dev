@@ -1,0 +1,31 @@
+{
+  "case": "xyl",
+  "mode": "fft",
+  "device": "cpu",
+  "batch_size": 8,
+  "height": 256,
+  "drr_patch_size": 128,
+  "bone_threshold": 350.0,
+  "seed": 20261012,
+  "contrast": 7.673743724822998,
+  "cutoff_ratio": 0.10082464665174484,
+  "tube_applied": true,
+  "checkpoint": null,
+  "loss_before_training": 6.099821090698242,
+  "panels": [
+    "target DRR",
+    "FFT input",
+    "bone/tube target",
+    "predicted DRR",
+    "predicted mask"
+  ],
+  "run_id": "train-addspdeco-fft",
+  "model_class": "PoseRegressorAddSpDeco",
+  "weights_updated": false,
+  "display_normalization": "per-panel min/max; display only",
+  "input_preview_panels": [
+    "target DRR",
+    "FFT input",
+    "bone/tube target"
+  ]
+}
